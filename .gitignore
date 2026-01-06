@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+env/
+uv.lock
+
+.env
+.env.local
+.vertex-ai.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Specalign workspace (optional - uncomment if you don't want to track workspaces)
+# .specalign/
+examples/

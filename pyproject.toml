@@ -1,0 +1,22 @@
+[project]
+name = "specalign"
+version = "0.1.0"
+description = "A command line tool for generating, iterating, and maintaining LLM prompts"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "click>=8.1.7",
+    "pyyaml>=6.0.1",
+    "litellm>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "google>=3.0.0",
+    "google-cloud-aiplatform==1.47.0",
+    "google-generativeai==0.5.0",
+]
+
+[project.scripts]
+specalign = "specalign.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
