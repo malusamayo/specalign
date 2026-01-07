@@ -12,6 +12,9 @@ dependencies = [
     "google>=3.0.0",
     "google-cloud-aiplatform==1.47.0",
     "google-generativeai==0.5.0",
+    "dspy>=3.1.0",
+    "gepa[dspy]==0.0.22",
+    "tqdm>=4.66.0",
 ]
 
 [project.scripts]

@@ -9,31 +9,8 @@ from typing import Any, Optional
 import click
 
 from specalign.llm_client import LLMClient
-from specalign.utils import batch_inference
+from specalign.utils import batch_inference, evaluate_responses_against_specs, run_task
 from specalign.workspace import Workspace
-
-
-EVALUATION_PROMPT_TEMPLATE = """You are evaluating an LLM response against a specific specification.
-
-SPECIFICATION:
-{spec_content}
-
-USER INPUT:
-{user_input}
-
-MODEL OUTPUT:
-{model_output}
-
-Based on the specification's requirements, evaluation guidelines, and examples, evaluate this response.
-
-Provide your evaluation in the following JSON format:
-{{
-  "score": 1 or 0 (1 = pass, 0 = fail),
-  "rationale": "Brief explanation of why it passed or failed",
-  "violations": ["list", "of", "specific", "violation", "types"] or []
-}}
-
-Output ONLY the JSON, nothing else."""
 
 
 def load_data_samples(data_config_path: Path, max_samples: Optional[int] = None) -> list[dict[str, Any]]:
@@ -80,61 +57,13 @@ def load_data_samples(data_config_path: Path, max_samples: Optional[int] = None)
     return samples
 
 
-def evaluate_response(
-    spec_name: str,
-    spec_content: str,
-    user_input: str,
-    model_output: str,
-    eval_client: LLMClient
-) -> dict[str, Any]:
-    """Evaluate a single response against a specification.
-
-    Args:
-        spec_name: Name of the specification.
-        spec_content: Full specification content.
-        user_input: User input/prompt.
-        model_output: Model's response.
-        eval_client: LLM client for evaluation.
-
-    Returns:
-        Evaluation result with score, rationale, and violations.
-    """
-    eval_prompt = EVALUATION_PROMPT_TEMPLATE.format(
-        spec_content=spec_content,
-        user_input=user_input,
-        model_output=model_output
-    )
-
-    response = eval_client.generate(eval_prompt)
-
-    # Parse JSON response
-    response = response.strip()
-    if response.startswith("```json"):
-        response = response[7:]
-    if response.startswith("```"):
-        response = response[3:]
-    if response.endswith("```"):
-        response = response[:-3]
-
-    try:
-        result = json.loads(response.strip())
-        return result
-    except json.JSONDecodeError:
-        click.echo(f"Warning: Could not parse evaluation response for {spec_name}", err=True)
-        return {
-            "score": 0,
-            "rationale": "Evaluation parsing failed",
-            "violations": ["evaluation_error"]
-        }
-
-
 def run_evaluate(
     workspace: Workspace,
     model_config_path: Path,
     data_config_path: Path,
     max_samples: Optional[int] = None,
     prompt_number: Optional[int] = None,
-    max_workers: int = 10
+    max_workers: int = 32
 ) -> None:
     """Run the evaluate command.
 
@@ -206,113 +135,52 @@ def run_evaluate(
         "samples": []
     }
 
-    def generate_response(sample_id: int, user_prompt: str) -> dict[str, Any]:
-        """Generate a single model response.
-
-        Args:
-            sample_id: Sample identifier.
-            user_prompt: User input prompt.
-
-        Returns:
-            Dict with sample_id, user_prompt, and model_output.
-        """
-        try:
-            model_output = model_client.generate(user_prompt, system_prompt=system_prompt)
-        except Exception as e:
-            click.echo(f"\nError generating response for sample {sample_id}: {e}", err=True)
-            model_output = f"[Generation error: {e}]"
-
-        return {
-            "sample_id": sample_id,
-            "user_prompt": user_prompt,
-            "model_output": model_output
-        }
-
-    def evaluate_sample(sample_id: int, user_prompt: str, model_output: str) -> dict[str, Any]:
-        """Evaluate a single sample against all specs.
-
-        Args:
-            sample_id: Sample identifier.
-            user_prompt: User input prompt.
-            model_output: Model's generated output.
-
-        Returns:
-            Dict with evaluations for all specs.
-        """
-        def evaluate_spec(spec_name: str, spec_content: str) -> dict[str, Any]:
-            """Evaluate against a single spec."""
-            try:
-                return evaluate_response(
-                    spec_name, spec_content, user_prompt, model_output, eval_client
-                )
-            except Exception as e:
-                click.echo(f"\nError evaluating sample {sample_id} against {spec_name}: {e}", err=True)
-                return {
-                    "score": 0,
-                    "rationale": f"Evaluation error: {e}",
-                    "violations": ["evaluation_error"]
-                }
-
-        # Evaluate all specs in parallel using batch_inference
-        eval_args = [
-            {"spec_name": spec_name, "spec_content": spec_content}
-            for spec_name, spec_content in specs.items()
-        ]
-
-        eval_results = batch_inference(
-            evaluate_spec,
-            eval_args,
-            use_process=False,
-            max_workers=len(specs)
-        )
-
-        # Convert list of results to dict keyed by spec_name
-        evaluations = {
-            spec_name: eval_results[i]
-            for i, spec_name in enumerate(specs.keys())
-        }
-
-        return {
-            "sample_id": sample_id,
-            "input": {"prompt": user_prompt},
-            "model_output": {"text": model_output},
-            "evaluations": evaluations
-        }
-
     # Step 1: Generate responses for all samples in parallel
     click.echo(f"Generating responses in parallel (max {max_workers} workers)...")
+    prompts = [
+        sample.get("prompt", sample.get("input", ""))
+        for sample in samples
+    ]
     generation_args = [
         {
-            "sample_id": sample_id,
-            "user_prompt": sample.get("prompt", sample.get("input", ""))
+            "client": model_client,
+            "system_prompt": system_prompt,
+            "instruction": prompt,
         }
-        for sample_id, sample in enumerate(samples)
+        for prompt in prompts
     ]
 
     generation_results = batch_inference(
-        generate_response,
+        run_task,
         generation_args,
         use_process=False,
-        max_workers=min(len(samples), max_workers)
+        max_workers=max_workers
     )
 
-    # Step 2: Evaluate all samples in parallel
+    # Step 2: Evaluate all samples in parallel using shared workflow
     click.echo(f"Evaluating responses in parallel (max {max_workers} workers)...")
-    evaluation_args = [
-        {
-            "sample_id": gen_result["sample_id"],
-            "user_prompt": gen_result["user_prompt"],
-            "model_output": gen_result["model_output"]
-        }
-        for gen_result in generation_results
-    ]
 
-    sample_results = batch_inference(
-        evaluate_sample,
-        evaluation_args,
-        use_process=False,
-        max_workers=min(len(samples), max_workers)
+    # Prepare responses as (user_input, model_output) tuples
+    responses = list(zip(prompts, generation_results))
+
+    # Use shared evaluation workflow
+    all_evaluations = evaluate_responses_against_specs(
+        responses,
+        specs,
+        eval_client,
+        max_workers=max_workers
     )
+
+    # Format results with sample metadata
+    sample_results = [
+        {
+            "sample_id": sample_id,
+            "input": {"prompt": prompts[sample_id]},
+            "model_output": {"text": generation_results[sample_id]},
+            "evaluations": all_evaluations[sample_id]
+        }
+        for sample_id in range(len(generation_results))
+    ]
 
     # Add all results
     results["samples"] = sample_results

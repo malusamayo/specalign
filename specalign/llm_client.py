@@ -1,4 +1,4 @@
-"""LLM client wrapper for litellm."""
+"""LLM client wrapper."""
 
 import json
 import os
@@ -7,14 +7,13 @@ from typing import Any, Optional
 
 import yaml
 from dotenv import load_dotenv
-from litellm import completion
 from dspy import LM
 
 load_dotenv(override=True)
 
 
 class LLMClient:
-    """Wrapper for LLM API calls using litellm."""
+    """Wrapper for LLM API calls using dspy."""
 
     def __init__(self, model_config_path: Optional[Path] = None, model_name: Optional[str] = None):
         """Initialize LLM client.
@@ -34,6 +33,16 @@ class LLMClient:
             self.config = {"name": model_name}
         else:
             raise ValueError("Either model_config_path or model_name must be provided")
+        
+        model_name = self.config.get("name")
+        kwargs = {}
+
+        if "temperature" in self.config:
+            kwargs["temperature"] = self.config["temperature"]
+        if "max_tokens" in self.config:
+            kwargs["max_tokens"] = self.config["max_tokens"]
+
+        self.lm = LM(model_name, **kwargs)
 
         self._resolve_env_vars()
 
@@ -61,16 +70,7 @@ class LLMClient:
 
         messages.append({"role": "user", "content": prompt})
 
-        model_name = self.config.get("name")
-        kwargs = {}
-
-        if "temperature" in self.config:
-            kwargs["temperature"] = self.config["temperature"]
-        if "max_tokens" in self.config:
-            kwargs["max_tokens"] = self.config["max_tokens"]
-
-        lm = LM(model_name, **kwargs)
-        response = lm(messages=messages)[0]
+        response = self.lm(messages=messages)[0]
         return response
 
     @staticmethod
