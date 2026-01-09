@@ -40,10 +40,11 @@ def init(path: Path):
 )
 @click.option(
     "--model",
-    default="vertex_ai/gemini-2.5-flash",
-    help="Model to use for compilation (default: vertex_ai/gemini-2.5-flash)"
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Path to model configuration YAML file"
 )
-def compile(path: Path, model: str):
+def compile(path: Path, model: Path):
     """Generate a new prompt based on current specifications."""
     workspace = Workspace(path)
     run_compile(workspace, model)

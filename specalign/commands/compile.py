@@ -55,12 +55,12 @@ Create a prompt that an LLM can follow to meet all these specifications. The pro
     return compiled_prompt
 
 
-def run_compile(workspace: Workspace, model_name: str) -> None:
+def run_compile(workspace: Workspace, model_config_path: Path) -> None:
     """Run the compile command.
 
     Args:
         workspace: Workspace instance.
-        model_name: Model to use for compilation.
+        model_config_path: Path to model configuration YAML file. If None, uses default model.
     """
     if not workspace.exists():
         click.echo("Error: Workspace not initialized. Run 'specalign init' first.", err=True)
@@ -79,10 +79,10 @@ def run_compile(workspace: Workspace, model_name: str) -> None:
         click.echo(f"  - {spec_file.name}")
 
     # Create LLM client for compilation
-    click.echo(f"\nCompiling prompt using {model_name}...")
-
+    click.echo(f"\nCompiling prompt using model config: {model_config_path}...")
+    llm_client = LLMClient(model_config_path=model_config_path)
+    model_display = str(model_config_path)
     try:
-        llm_client = LLMClient.create_default_client(model_name)
         compiled_prompt = compile_prompt(spec_files, llm_client)
 
         # Create new prompt directory
@@ -97,7 +97,7 @@ def run_compile(workspace: Workspace, model_name: str) -> None:
         # Save config
         config = {
             "compilation": {
-                "model": model_name,
+                "model": model_display,
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "spec_files": [str(f.relative_to(workspace.root)) for f in spec_files],
             }
@@ -112,7 +112,7 @@ def run_compile(workspace: Workspace, model_name: str) -> None:
 ===============
 
 Timestamp: {config['compilation']['timestamp']}
-Model: {model_name}
+Model: {model_display}
 
 Specifications Used:
 """
