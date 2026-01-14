@@ -1,0 +1,6 @@
+{
+  "dataset_name": "esci_data",
+  "description": "ESCI product description dataset",
+  "path": "/Users/ramyapriyanandhiniganeshkumar/RA/specalign/esci_input.csv",
+  "format": "csv"
+}
