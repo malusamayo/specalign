@@ -1,5 +1,6 @@
 """Implementation of 'specalign generate' command for synthetic data generation."""
 
+import csv
 import datetime
 import json
 import re
@@ -10,6 +11,7 @@ import click
 import yaml
 
 from specalign.llm_client import LLMClient
+from specalign.utils import batch_inference
 from specalign.workspace import Workspace
 
 
@@ -79,7 +81,9 @@ Output format: JSON array of test cases, where each test case follows this struc
   }}
 }}
 
-Generate diverse test cases covering all the specifications provided. Focus on testing specification compliance, not exact text matching."""
+Generate diverse test cases covering all the specifications provided. Focus on testing specification compliance, not exact text matching.
+
+If examples are provided, use them as reference to generate realistic test cases that match the distribution and style of the examples."""
 
 
 def normalize_assertions(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -176,40 +180,106 @@ def parse_test_cases_from_llm_response(response: str) -> List[Dict[str, Any]]:
         return []
 
 
-def generate_test_cases(
-    specs: Dict[str, str],
-    llm_client: LLMClient,
-    count: int,
-    per_spec: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    """Generate synthetic test cases using LLM.
-
+def load_examples(workspace: Workspace, max_examples: int = 10) -> List[Dict[str, Any]]:
+    """Load example data from workspace examples directory.
+    
     Args:
-        specs: Dictionary mapping spec names to spec content.
-        llm_client: LLM client for generation.
-        count: Total number of test cases to generate.
-        per_spec: Number of test cases per spec (if None, distributes evenly).
+        workspace: Workspace instance.
+        max_examples: Maximum number of examples to load.
+        
+    Returns:
+        List of example dictionaries, each with 'input' key.
+    """
+    example_files = workspace.get_example_files()
+    if not example_files:
+        return []
+    
+    examples = []
+    for example_file in example_files:
+        try:
+            if example_file.suffix == ".json":
+                with open(example_file) as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        examples.extend(data[:max_examples - len(examples)])
+                    else:
+                        examples.append(data)
+                        if len(examples) >= max_examples:
+                            break
+            elif example_file.suffix == ".jsonl":
+                with open(example_file) as f:
+                    for line in f:
+                        if len(examples) >= max_examples:
+                            break
+                        examples.append(json.loads(line))
+            elif example_file.suffix == ".csv":
+                with open(example_file) as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if len(examples) >= max_examples:
+                            break
+                        # Use 'input' or 'prompt' column, or first column
+                        input_value = row.get("input") or row.get("prompt") or list(row.values())[0]
+                        examples.append({"input": input_value})
+        except Exception as e:
+            click.echo(f"Warning: Could not load examples from {example_file}: {e}", err=True)
+            continue
+        
+        if len(examples) >= max_examples:
+            break
+    
+    return examples[:max_examples]
 
+
+def format_examples_for_prompt(examples: List[Dict[str, Any]]) -> str:
+    """Format examples for inclusion in prompt.
+    
+    Args:
+        examples: List of example dictionaries.
+        
+    Returns:
+        Formatted string with examples.
+    """
+    if not examples:
+        return ""
+    
+    formatted = "\n\nEXAMPLES TO FOLLOW (generate similar test cases):\n"
+    for i, example in enumerate(examples, 1):
+        input_value = example.get("input", example.get("prompt", str(example)))
+        formatted += f"\nExample {i}:\n"
+        formatted += f"Input: {input_value}\n"
+        if "output" in example:
+            formatted += f"Output: {example['output']}\n"
+    
+    return formatted
+
+
+def generate_test_cases_for_spec(
+    spec_name: str,
+    spec_content: str,
+    llm_client: LLMClient,
+    cases_per_spec: int,
+    examples: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Generate test cases for a single specification.
+    
+    Args:
+        spec_name: Name of the specification.
+        spec_content: Content of the specification.
+        llm_client: LLM client for generation.
+        cases_per_spec: Number of test cases to generate.
+        examples: List of example dictionaries for few-shot learning.
+        
     Returns:
         List of test case dictionaries.
     """
-    all_test_cases = []
+    examples_text = format_examples_for_prompt(examples)
     
-    if per_spec:
-        # Generate per_spec test cases for each specification
-        cases_per_spec = per_spec
-    else:
-        # Distribute evenly across specs
-        num_specs = len(specs)
-        cases_per_spec = max(1, count // num_specs) if num_specs > 0 else count
-    
-    for spec_name, spec_content in specs.items():
-        click.echo(f"Generating test cases for spec: {spec_name}...")
-        
-        user_prompt = f"""Generate {cases_per_spec} diverse test cases based on this specification:
+    user_prompt = f"""Generate {cases_per_spec} diverse test cases based on this specification:
 
 === {spec_name} ===
 {spec_content}
+{examples_text}
 
 IMPORTANT GUIDELINES:
 1. Test case inputs should be realistic product attribute data or natural language requests
@@ -222,38 +292,99 @@ IMPORTANT GUIDELINES:
    - Structural requirements (javascript checking HTML tags, segments, etc.)
 5. Avoid assertions that check for exact word-for-word output matches
 6. Focus on testing specification compliance, not exact phrasing
+7. If examples are provided, generate test cases that match their style and distribution
 
 Each test case must include metadata linking it to the "{spec_name}" specification."""
 
-        try:
-            response = llm_client.generate(
-                prompt=user_prompt,
-                system_prompt=SYNTHETIC_DATA_GENERATION_PROMPT
-            )
-            
-            test_cases = parse_test_cases_from_llm_response(response)
-            
-            # Normalize assertions to use valid promptfoo types
-            test_cases = normalize_assertions(test_cases)
-            
-            # Ensure metadata links to this spec
-            for test_case in test_cases:
-                if "metadata" not in test_case:
-                    test_case["metadata"] = {}
-                
-                # Ensure spec_requirements includes this spec
-                if "spec_requirements" not in test_case["metadata"]:
-                    test_case["metadata"]["spec_requirements"] = []
-                
-                if spec_name not in test_case["metadata"]["spec_requirements"]:
-                    test_case["metadata"]["spec_requirements"].append(spec_name)
-            
-            all_test_cases.extend(test_cases)
-            click.echo(f"  Generated {len(test_cases)} test cases")
+    try:
+        response = llm_client.generate(
+            prompt=user_prompt,
+            system_prompt=SYNTHETIC_DATA_GENERATION_PROMPT
+        )
         
-        except Exception as e:
-            click.echo(f"  Error generating test cases for {spec_name}: {e}", err=True)
-            continue
+        test_cases = parse_test_cases_from_llm_response(response)
+        
+        # Normalize assertions to use valid promptfoo types
+        test_cases = normalize_assertions(test_cases)
+        
+        # Ensure metadata links to this spec
+        for test_case in test_cases:
+            if "metadata" not in test_case:
+                test_case["metadata"] = {}
+            
+            # Ensure spec_requirements includes this spec
+            if "spec_requirements" not in test_case["metadata"]:
+                test_case["metadata"]["spec_requirements"] = []
+            
+            if spec_name not in test_case["metadata"]["spec_requirements"]:
+                test_case["metadata"]["spec_requirements"].append(spec_name)
+        
+        return test_cases
+    
+    except Exception as e:
+        click.echo(f"  Error generating test cases for {spec_name}: {e}", err=True)
+        return []
+
+
+def generate_test_cases(
+    specs: Dict[str, str],
+    llm_client: LLMClient,
+    count: int,
+    per_spec: Optional[int] = None,
+    examples: Optional[List[Dict[str, Any]]] = None,
+    max_workers: int = 10
+) -> List[Dict[str, Any]]:
+    """Generate synthetic test cases using LLM with parallel processing.
+
+    Args:
+        specs: Dictionary mapping spec names to spec content.
+        llm_client: LLM client for generation.
+        count: Total number of test cases to generate.
+        per_spec: Number of test cases per spec (if None, distributes evenly).
+        examples: Optional list of example dictionaries for few-shot learning.
+        max_workers: Maximum number of parallel workers for generation.
+
+    Returns:
+        List of test case dictionaries.
+    """
+    if examples is None:
+        examples = []
+    
+    if per_spec:
+        # Generate per_spec test cases for each specification
+        cases_per_spec = per_spec
+    else:
+        # Distribute evenly across specs
+        num_specs = len(specs)
+        cases_per_spec = max(1, count // num_specs) if num_specs > 0 else count
+    
+    # Prepare arguments for parallel generation
+    generation_args = [
+        {
+            "spec_name": spec_name,
+            "spec_content": spec_content,
+            "llm_client": llm_client,
+            "cases_per_spec": cases_per_spec,
+            "examples": examples
+        }
+        for spec_name, spec_content in specs.items()
+    ]
+    
+    # Generate test cases in parallel
+    click.echo(f"Generating test cases in parallel (max {max_workers} workers)...")
+    all_results = batch_inference(
+        generate_test_cases_for_spec,
+        generation_args,
+        use_process=False,
+        max_workers=min(len(generation_args), max_workers)
+    )
+    
+    # Flatten results
+    all_test_cases = []
+    for i, (spec_name, _) in enumerate(specs.items()):
+        test_cases = all_results[i]
+        all_test_cases.extend(test_cases)
+        click.echo(f"  Generated {len(test_cases)} test cases for {spec_name}")
     
     # Limit to requested count
     if len(all_test_cases) > count:
@@ -372,6 +503,7 @@ def run_generate(
     output_path: Optional[Path] = None,
     count: int = 10,
     per_spec: Optional[int] = None,
+    max_workers: int = 10,
 ) -> None:
     """Run the generate command.
 
@@ -381,6 +513,7 @@ def run_generate(
         output_path: Optional path to save test cases file. If None, uses default location.
         count: Total number of test cases to generate.
         per_spec: Number of test cases per specification (overrides count distribution).
+        max_workers: Maximum number of parallel workers for generation.
     """
     if not workspace.exists():
         click.echo("Error: Workspace not initialized. Run 'specalign init' first.", err=True)
@@ -404,13 +537,20 @@ def run_generate(
             specs[spec_name] = f.read()
             click.echo(f"  - {spec_name}")
     
+    # Load examples if available
+    examples = load_examples(workspace, max_examples=10)
+    if examples:
+        click.echo(f"Loaded {len(examples)} example(s) from {workspace.examples_dir}")
+    else:
+        click.echo(f"No examples found in {workspace.examples_dir} (using zero-shot generation)")
+    
     # Create LLM client
     click.echo(f"\nUsing model config: {model_config_path}")
     llm_client = LLMClient(model_config_path=model_config_path)
     
     # Generate test cases
     click.echo(f"\nGenerating {count} test cases...")
-    test_cases = generate_test_cases(specs, llm_client, count, per_spec)
+    test_cases = generate_test_cases(specs, llm_client, count, per_spec, examples, max_workers)
     
     if not test_cases:
         click.echo("Error: No test cases were generated.", err=True)
