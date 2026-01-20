@@ -136,10 +136,16 @@ def evaluate(path: Path, model: Path, data: Path, max_samples: int, prompt: int,
     default=None,
     help="Number of test cases per specification (overrides count distribution)"
 )
-def generate(path: Path, model: Path, output: Path, count: int, per_spec: int):
+@click.option(
+    "--workers",
+    type=int,
+    default=10,
+    help="Maximum number of parallel workers for generation (default: 10)"
+)
+def generate(path: Path, model: Path, output: Path, count: int, per_spec: int, workers: int):
     """Generate synthetic test cases based on specifications."""
     workspace = Workspace(path)
-    run_generate(workspace, model, output, count, per_spec)
+    run_generate(workspace, model, output, count, per_spec, workers)
 
 
 @cli.command()
