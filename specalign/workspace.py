@@ -9,7 +9,7 @@ class Workspace:
     """Manages the specalign workspace structure."""
 
     WORKSPACE_DIR = ".specalign"
-    SUBDIRS = ["specs", "prompts", "models", "data", "results", "test_cases"]
+    SUBDIRS = ["specs", "prompts", "models", "data", "results", "test_cases", "examples"]
 
     def __init__(self, root_path: Optional[Path] = None):
         """Initialize workspace.
@@ -49,6 +49,11 @@ class Workspace:
     def test_cases_dir(self) -> Path:
         """Return test cases directory path."""
         return self.workspace_root / "test_cases"
+
+    @property
+    def examples_dir(self) -> Path:
+        """Return examples directory path."""
+        return self.workspace_root / "examples"
 
     def exists(self) -> bool:
         """Check if workspace is initialized."""
@@ -115,3 +120,19 @@ class Workspace:
             Path to data config file.
         """
         return self.data_dir / f"{data_name}.json"
+
+    def get_example_files(self) -> list[Path]:
+        """Get all example files in examples directory.
+        
+        Examples can be in JSON, JSONL, or CSV format.
+        
+        Returns:
+            List of example file paths.
+        """
+        if not self.examples_dir.exists():
+            return []
+        example_files = []
+        example_files.extend(self.examples_dir.glob("*.json"))
+        example_files.extend(self.examples_dir.glob("*.jsonl"))
+        example_files.extend(self.examples_dir.glob("*.csv"))
+        return sorted(example_files)

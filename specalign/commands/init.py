@@ -279,8 +279,22 @@ def run_init(workspace: Workspace, extraction_model_config_path: Optional[Path] 
     else:
         click.echo(f"You can manually create spec files in the {workspace.specs_dir} directory")
 
+    click.echo("\n--- Example Data (Optional) ---")
+    click.echo("💡 Tip: Add example data files to improve synthetic data generation quality!")
+    click.echo(f"   Place example files in: {workspace.examples_dir}")
+    click.echo("   Supported formats: JSON, JSONL, CSV")
+    click.echo("   Files should have 'input' or 'prompt' column/field")
+    click.echo("   Examples will be used for few-shot learning during generation")
+    
     click.echo("\nInitialization complete!")
     click.echo("\nNext steps:")
     click.echo(f"  1. Review/edit specifications in {workspace.specs_dir}")
-    click.echo("  2. Run 'specalign compile' to generate a prompt")
-    click.echo("  3. Run 'specalign evaluate' to test your prompt")
+    if not workspace.examples_dir.exists() or not list(workspace.examples_dir.glob("*")):
+        click.echo(f"  2. (Optional) Add example files to {workspace.examples_dir} for better results")
+        click.echo("  3. Run 'specalign compile' to generate a prompt")
+        click.echo("  4. Run 'specalign generate' to create synthetic test cases")
+        click.echo("  5. Run 'specalign evaluate' to test your prompt")
+    else:
+        click.echo("  2. Run 'specalign compile' to generate a prompt")
+        click.echo("  3. Run 'specalign generate' to create synthetic test cases (will use your examples)")
+        click.echo("  4. Run 'specalign evaluate' to test your prompt")
