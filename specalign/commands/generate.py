@@ -180,6 +180,128 @@ def parse_test_cases_from_llm_response(response: str) -> List[Dict[str, Any]]:
         return []
 
 
+def load_examples_from_path(example_path: Path, max_examples: int = 10) -> List[Dict[str, Any]]:
+    """Load example data from a specific file or directory.
+    
+    Args:
+        example_path: Path to example file or directory.
+        max_examples: Maximum number of examples to load.
+        
+    Returns:
+        List of example dictionaries, each with 'input' key.
+    """
+    example_files = []
+    
+    if example_path.is_file():
+        example_files = [example_path]
+    elif example_path.is_dir():
+        example_files = sorted(example_path.glob("*.json"))
+        example_files.extend(sorted(example_path.glob("*.jsonl")))
+        example_files.extend(sorted(example_path.glob("*.csv")))
+    else:
+        click.echo(f"Warning: Example path does not exist: {example_path}", err=True)
+        return []
+    
+    return _load_examples_from_files(example_files, max_examples)
+
+
+def _load_examples_from_files(example_files: List[Path], max_examples: int = 10) -> List[Dict[str, Any]]:
+    """Load examples from a list of files.
+    
+    Args:
+        example_files: List of file paths to load.
+        max_examples: Maximum number of examples to load.
+        
+    Returns:
+        List of example dictionaries, each with 'input' key.
+    """
+    if not example_files:
+        return []
+    
+    examples = []
+    loaded_count = 0
+    
+    for example_file in example_files:
+        if loaded_count >= max_examples:
+            break
+            
+        try:
+            if example_file.suffix == ".json":
+                with open(example_file) as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        for item in data:
+                            if loaded_count >= max_examples:
+                                break
+                            if isinstance(item, dict):
+                                examples.append(item)
+                                loaded_count += 1
+                    elif isinstance(data, dict):
+                        examples.append(data)
+                        loaded_count += 1
+                    else:
+                        click.echo(f"Warning: {example_file} contains invalid JSON structure (expected object or array)", err=True)
+                        
+            elif example_file.suffix == ".jsonl":
+                with open(example_file) as f:
+                    for line_num, line in enumerate(f, 1):
+                        if loaded_count >= max_examples:
+                            break
+                        try:
+                            item = json.loads(line.strip())
+                            if isinstance(item, dict):
+                                examples.append(item)
+                                loaded_count += 1
+                            else:
+                                click.echo(f"Warning: {example_file}:{line_num} is not a JSON object, skipping", err=True)
+                        except json.JSONDecodeError as e:
+                            click.echo(f"Warning: {example_file}:{line_num} - Invalid JSON: {e}", err=True)
+                            
+            elif example_file.suffix == ".csv":
+                with open(example_file) as f:
+                    reader = csv.DictReader(f)
+                    if not reader.fieldnames:
+                        click.echo(f"Warning: {example_file} appears to be empty or invalid CSV", err=True)
+                        continue
+                    
+                    for row_num, row in enumerate(reader, 1):
+                        if loaded_count >= max_examples:
+                            break
+                        # Use 'input' or 'prompt' column, or first column
+                        input_value = row.get("input") or row.get("prompt")
+                        if not input_value and row:
+                            input_value = list(row.values())[0]
+                        
+                        if input_value:
+                            examples.append({"input": input_value})
+                            loaded_count += 1
+                        else:
+                            click.echo(f"Warning: {example_file}:{row_num} - No 'input' or 'prompt' column found, skipping", err=True)
+                            
+        except json.JSONDecodeError as e:
+            click.echo(f"Error: Could not parse JSON from {example_file}: {e}", err=True)
+            click.echo(f"   Make sure the file contains valid JSON (object or array of objects)", err=True)
+        except csv.Error as e:
+            click.echo(f"Error: Could not parse CSV from {example_file}: {e}", err=True)
+            click.echo(f"   Make sure the file is a valid CSV with 'input' or 'prompt' column", err=True)
+        except Exception as e:
+            click.echo(f"Error: Could not load examples from {example_file}: {e}", err=True)
+            continue
+    
+    # Validate examples have required fields
+    validated_examples = []
+    for i, example in enumerate(examples, 1):
+        if not isinstance(example, dict):
+            click.echo(f"Warning: Example {i} is not a dictionary, skipping", err=True)
+            continue
+        if "input" not in example and "prompt" not in example:
+            click.echo(f"Warning: Example {i} missing 'input' or 'prompt' field, skipping", err=True)
+            continue
+        validated_examples.append(example)
+    
+    return validated_examples[:max_examples]
+
+
 def load_examples(workspace: Workspace, max_examples: int = 10) -> List[Dict[str, Any]]:
     """Load example data from workspace examples directory.
     
@@ -191,44 +313,7 @@ def load_examples(workspace: Workspace, max_examples: int = 10) -> List[Dict[str
         List of example dictionaries, each with 'input' key.
     """
     example_files = workspace.get_example_files()
-    if not example_files:
-        return []
-    
-    examples = []
-    for example_file in example_files:
-        try:
-            if example_file.suffix == ".json":
-                with open(example_file) as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        examples.extend(data[:max_examples - len(examples)])
-                    else:
-                        examples.append(data)
-                        if len(examples) >= max_examples:
-                            break
-            elif example_file.suffix == ".jsonl":
-                with open(example_file) as f:
-                    for line in f:
-                        if len(examples) >= max_examples:
-                            break
-                        examples.append(json.loads(line))
-            elif example_file.suffix == ".csv":
-                with open(example_file) as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if len(examples) >= max_examples:
-                            break
-                        # Use 'input' or 'prompt' column, or first column
-                        input_value = row.get("input") or row.get("prompt") or list(row.values())[0]
-                        examples.append({"input": input_value})
-        except Exception as e:
-            click.echo(f"Warning: Could not load examples from {example_file}: {e}", err=True)
-            continue
-        
-        if len(examples) >= max_examples:
-            break
-    
-    return examples[:max_examples]
+    return _load_examples_from_files(example_files, max_examples)
 
 
 def format_examples_for_prompt(examples: List[Dict[str, Any]]) -> str:
@@ -504,6 +589,7 @@ def run_generate(
     count: int = 10,
     per_spec: Optional[int] = None,
     max_workers: int = 10,
+    examples_path: Optional[Path] = None,
 ) -> None:
     """Run the generate command.
 
@@ -514,6 +600,7 @@ def run_generate(
         count: Total number of test cases to generate.
         per_spec: Number of test cases per specification (overrides count distribution).
         max_workers: Maximum number of parallel workers for generation.
+        examples_path: Optional path to example file(s) or directory. If None, uses workspace examples directory.
     """
     if not workspace.exists():
         click.echo("Error: Workspace not initialized. Run 'specalign init' first.", err=True)
@@ -538,11 +625,22 @@ def run_generate(
             click.echo(f"  - {spec_name}")
     
     # Load examples if available
-    examples = load_examples(workspace, max_examples=10)
-    if examples:
-        click.echo(f"Loaded {len(examples)} example(s) from {workspace.examples_dir}")
+    if examples_path:
+        click.echo(f"Loading examples from: {examples_path}")
+        examples = load_examples_from_path(examples_path, max_examples=10)
+        if examples:
+            click.echo(f"✓ Loaded {len(examples)} example(s) from {examples_path}")
+        else:
+            click.echo(f"⚠ No valid examples found in {examples_path} (using zero-shot generation)", err=True)
+            click.echo(f"   Supported formats: JSON, JSONL, CSV with 'input' or 'prompt' field", err=True)
     else:
-        click.echo(f"No examples found in {workspace.examples_dir} (using zero-shot generation)")
+        examples = load_examples(workspace, max_examples=10)
+        if examples:
+            click.echo(f"✓ Loaded {len(examples)} example(s) from {workspace.examples_dir}")
+        else:
+            click.echo(f"ℹ No examples found in {workspace.examples_dir} (using zero-shot generation)")
+            click.echo(f"   💡 Tip: Add example files to {workspace.examples_dir} for better results")
+            click.echo(f"      Supported: JSON, JSONL, CSV with 'input' or 'prompt' field")
     
     # Create LLM client
     click.echo(f"\nUsing model config: {model_config_path}")

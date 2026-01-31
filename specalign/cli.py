@@ -142,10 +142,16 @@ def evaluate(path: Path, model: Path, data: Path, max_samples: int, prompt: int,
     default=10,
     help="Maximum number of parallel workers for generation (default: 10)"
 )
-def generate(path: Path, model: Path, output: Path, count: int, per_spec: int, workers: int):
+@click.option(
+    "--examples",
+    type=click.Path(exists=True, file_okay=True, dir_okay=True, path_type=Path),
+    default=None,
+    help="Path to example file(s) or directory for few-shot learning. If directory, loads all JSON/JSONL/CSV files. If not specified, uses .specalign/examples/"
+)
+def generate(path: Path, model: Path, output: Path, count: int, per_spec: int, workers: int, examples: Path):
     """Generate synthetic test cases based on specifications."""
     workspace = Workspace(path)
-    run_generate(workspace, model, output, count, per_spec, workers)
+    run_generate(workspace, model, output, count, per_spec, workers, examples)
 
 
 @cli.command()
