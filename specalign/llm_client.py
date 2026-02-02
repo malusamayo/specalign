@@ -34,17 +34,29 @@ class LLMClient:
         else:
             raise ValueError("Either model_config_path or model_name must be provided")
         
+        # Resolve environment variables BEFORE creating LM
+        self._resolve_env_vars()
+        
         model_name = self.config.get("name")
+        if model_name:
+            model_name = model_name.strip()  # Remove leading/trailing whitespace
+        
+        if not model_name:
+            raise ValueError("Model name not found in configuration")
+        
         kwargs = {}
 
         if "temperature" in self.config:
             kwargs["temperature"] = self.config["temperature"]
         if "max_tokens" in self.config:
             kwargs["max_tokens"] = self.config["max_tokens"]
+        
+        # Pass API key to LM if available (dspy/LM uses litellm which reads from env or kwargs)
+        if "api_key" in self.config and self.config["api_key"]:
+            # Set environment variable for litellm to pick up
+            os.environ["OPENAI_API_KEY"] = self.config["api_key"]
 
         self.lm = LM(model_name, **kwargs)
-
-        self._resolve_env_vars()
 
     def _resolve_env_vars(self) -> None:
         """Resolve environment variables in config values."""
