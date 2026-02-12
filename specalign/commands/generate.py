@@ -29,61 +29,155 @@ Each test case should be formatted as a promptfoo test case with:
 - metadata: Link to the specification(s) it tests
 
 CRITICAL ASSERTION GUIDELINES:
-1. **Check for SEMANTIC meaning, not exact text**: Don't check for exact phrases like "Strength: 500mg". Instead check that the output contains the key information (e.g., "500mg" and "strength" or "60" and "uses").
+1. **Check for SEMANTIC meaning, not exact text**: The model will paraphrase. Do NOT use "contains" for descriptive words that have common synonyms or paraphrases (e.g. hydrates→hydration/moisture, breathable→breath/ventilation, cushioning→cushion/support/comfort, durable→long-lasting/resilient, boiling→boil). Use JavaScript assertions that check for word stems or key concepts (e.g. output.toLowerCase().includes('hydrat') || output.toLowerCase().includes('moistur')).
 
-2. **Match the actual prompt requirements**: Read the prompt carefully and check for what it ACTUALLY requires, not what you think it should require. For example, if the prompt says "Characteristics for Usage", don't check for "Product Characteristics".
+2. **Never require exact input wording**: Do not assert that the output must copy phrases from the input verbatim (e.g. "rich texture", "comfortable sleep experience"). The model may rephrase. Check for the underlying meaning with flexible JavaScript (e.g. presence of related terms or stems).
 
-3. **Use flexible assertions**: Prefer JavaScript assertions that check for presence of key information rather than exact string matches. For example:
-   - Instead of: {{"type": "contains", "value": "Strength: 500mg"}}
-   - Use: {{"type": "javascript", "value": "output.includes('500mg') && (output.includes('strength') || output.includes('Strength'))"}}
+3. **Spec compliance over input copying**: If the specification requires a particular wording (e.g. British English "flavour"), NEVER assert that the output must contain the opposite (e.g. American "flavor") even if the input contains it. Assert what the SPEC requires (e.g. output uses "flavour" or does not use "flavor"), not verbatim repetition of the input.
 
-4. **Check for structure, not exact wording**: For HTML structure, check that required tags exist and are properly formatted, not that they contain exact text.
+4. **Match the actual prompt requirements**: Read the prompt carefully and check for what it ACTUALLY requires (e.g. "Characteristics for Usage"), not exact header strings.
 
-5. **Avoid checking for exact header text**: Headers might be phrased differently. Check that required sections exist using flexible matching.
+5. **Use flexible assertions**: Prefer JavaScript for any content check. Reserve "contains" only for terms that must appear literally (e.g. a specific spelling like "flavour" when testing British English, or forbidden-word absence via javascript !output.includes).
 
-IMPORTANT: Use only valid promptfoo assertion types:
-- "contains": Check if output contains text (use sparingly, only for key terms that must appear)
-- "equals": Check if output equals text exactly (avoid unless absolutely necessary)
-- "javascript": Custom JavaScript assertion (PREFERRED for flexible checks)
-- "regex": Regex pattern match (use for pattern matching)
-- "python": Custom Python assertion
+6. **Structure, not exact wording**: For HTML, check that required tags exist; do not require exact phrase matches inside them.
 
-For negative checks (e.g., "should NOT contain"), use javascript assertions with negation:
-  {{"type": "javascript", "value": "!output.includes('forbidden text')"}}
+EXAMPLES OF BAD vs GOOD ASSERTIONS:
+- BAD: {{"type": "contains", "value": "hydrates"}}  → Model may say "skin hydration" or "maintains moisture".
+- GOOD: {{"type": "javascript", "value": "(output.toLowerCase().includes('hydrat') || output.toLowerCase().includes('moistur'))"}}
+- BAD: {{"type": "contains", "value": "breathable"}}  → Model may say "breathable" or "breathability" or "allows air flow".
+- GOOD: {{"type": "javascript", "value": "(output.toLowerCase().includes('breath') || output.toLowerCase().includes('ventilat') || output.toLowerCase().includes('air'))"}}
+- BAD: Requiring output to include "with a spicy flavor" when the spec says use British English (output should use "flavour", not "flavor").
+- GOOD: {{"type": "javascript", "value": "output.includes('flavour') && !output.includes('flavor')"}} for British English spec, or check for semantic presence of "spicy" and British spelling.
 
-Output format: JSON array of test cases, where each test case follows this structure:
+Use only valid promptfoo assertion types:
+- "contains": ONLY for terms that must appear literally (e.g. "flavour" when testing British English). Do NOT use for paraphrased concepts.
+- "javascript": PREFERRED for almost all checks (semantic presence, stems, negation, structure).
+- "regex": For pattern matching (e.g. HTML tags).
+
+For negative checks use: {{"type": "javascript", "value": "!output.includes('forbidden text')"}}
+
+Output format: JSON array of test cases. Each test case:
 {{
-  "vars": {{
-    "input": "example user input"
-  }},
+  "vars": {{ "input": "..." }},
   "assert": [
-    {{
-      "type": "contains",
-      "value": "key term that must appear"
-    }},
-    {{
-      "type": "javascript",
-      "value": "output.includes('key info 1') && output.includes('key info 2')"
-    }},
-    {{
-      "type": "javascript",
-      "value": "!output.includes('forbidden text')"
-    }},
-    {{
-      "type": "javascript",
-      "value": "/<h[34]>.*<\\/h[34]>/.test(output) && /<p>.*<\\/p>/.test(output)"
-    }}
+    {{ "type": "javascript", "value": "semantic or structural check" }},
+    {{ "type": "javascript", "value": "!output.includes('forbidden')" }},
+    {{ "type": "javascript", "value": "/<h[34]>.*<\\/h[34]>/.test(output) && /<p>.*<\\/p>/.test(output)" }}
   ],
-  "metadata": {{
-    "spec_requirements": ["spec-name-1", "spec-name-2"],
-    "scenario": "WHEN condition THEN expected behavior",
-    "requirement": "Requirement name from spec"
-  }}
+  "metadata": {{ "spec_requirements": ["spec-name"], "scenario": "...", "requirement": "..." }}
 }}
 
-Generate diverse test cases covering all the specifications provided. Focus on testing specification compliance, not exact text matching.
+Generate diverse test cases. Focus on specification compliance with semantic checks, not exact text matching. If examples are provided, match their style."""
 
-If examples are provided, use them as reference to generate realistic test cases that match the distribution and style of the examples."""
+# --- Scenario-agnostic relaxation (do not add domain-specific words) ---
+# These maps are kept minimal so specalign works for any domain (e.g. e-commerce, support, code).
+# Rely on the LLM prompt for semantic/flexible assertions; use these only for:
+# - Language/spelling variants (e.g. -ise/-ize, British vs American)
+# - Word stems that are safe across contexts (e.g. "hydrat", "durabl")
+# Developers with a specific scenario should improve the prompt or add custom assertions,
+# not extend these maps with scenario-only synonyms.
+
+# contains → semantic (stem) checks; only common stems that generalize.
+PARAPHRASE_STEMS: Dict[str, List[str]] = {
+    "hydration": ["hydrat", "moistur"],
+    "durable": ["durabl", "resilient", "sturdy"],
+    "high-quality": ["quality", "premium"],
+}
+
+# Single-word .includes() → allow spelling/stem variants only (no domain-specific synonyms).
+JS_WORD_SYNONYMS: Dict[str, List[str]] = {
+    "moisturising": ["moisturising", "moisturizing", "moistur"],
+    "flavour": ["flavour", "flavours"],
+    "protection": ["protection", "protect"],
+}
+
+
+def _make_semantic_js(stems: List[str]) -> str:
+    """Build a JavaScript expression that passes if output contains any of the stems (case-insensitive)."""
+    parts = [f"output.toLowerCase().includes({repr(s)})" for s in stems]
+    return "(" + " || ".join(parts) + ")"
+
+
+def _relax_js_includes(value: str) -> str:
+    """Replace strict .includes('word') in JS assertion with (word OR synonym1 OR ...) for known words."""
+    # Match output.includes('x') or output.toLowerCase().includes('x')
+    pattern = re.compile(
+        r"(output\.(?:toLowerCase\(\)\.)?includes\s*\(\s*)(['\"])([a-zA-Z]+)\2(\s*\))"
+    )
+    def repl(m: re.Match) -> str:
+        prefix, quote, word, suffix = m.group(1), m.group(2), m.group(3), m.group(4)
+        key = word.lower()
+        if key not in JS_WORD_SYNONYMS:
+            return m.group(0)
+        synonyms = JS_WORD_SYNONYMS[key]
+        parts = [f"{prefix}{quote}{s}{quote}{suffix}" for s in synonyms]
+        return "(" + " || ".join(parts) + ")"
+    return pattern.sub(repl, value)
+
+
+def _relax_html_regex(value: str) -> str:
+    """Make HTML regexes match across newlines: .* -> [\\s\\S]*? inside /.../."""
+    # Replace /<tag>.*</tag>/ with /<tag>[\s\S]*?<\/tag>/ so . matches newlines
+    value = re.sub(r"/<h\[34\]>\.\*</h\[34\]>/", r"/<h[34]>[\\s\\S]*?<\\/h[34]>/", value)
+    value = re.sub(r"/<p>\.\*</p>/", r"/<p>[\\s\\S]*?<\\/p>/", value)
+    value = re.sub(r"/<h3>\.\*</h3>/", r"/<h3>[\\s\\S]*?<\\/h3>/", value)
+    value = re.sub(r"/<h4>\.\*</h4>/", r"/<h4>[\\s\\S]*?<\\/h4>/", value)
+    value = re.sub(r"/<ul>\.\*</ul>/", r"/<ul>[\\s\\S]*?<\\/ul>/", value)
+    return value
+
+
+def relax_brittle_contains(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert brittle 'contains' assertions to semantic JavaScript checks where the model often paraphrases."""
+    for test_case in test_cases:
+        if "assert" not in test_case:
+            continue
+        spec_requirements = (test_case.get("metadata") or {}).get("spec_requirements") or []
+        spec_keys = {s.lower() for s in spec_requirements} if isinstance(spec_requirements, list) else set()
+
+        new_asserts = []
+        for assertion in test_case["assert"]:
+            a_type = assertion.get("type", "")
+            value = assertion.get("value", "")
+            if not isinstance(value, str):
+                new_asserts.append(assertion)
+                continue
+
+            # Convert contains to semantic js for known paraphrased terms
+            if a_type == "contains":
+                val_lower = value.strip().lower()
+                if val_lower in PARAPHRASE_STEMS:
+                    stems = PARAPHRASE_STEMS[val_lower]
+                    new_asserts.append({
+                        "type": "javascript",
+                        "value": _make_semantic_js(stems),
+                    })
+                    continue
+                # Keep contains for literal requirements (e.g. "flavour" for British English)
+                new_asserts.append(assertion)
+                continue
+
+            # Relax JavaScript assertions: allow synonyms and fix HTML regex (match across newlines)
+            if a_type == "javascript":
+                value = _relax_js_includes(value)
+                value = _relax_html_regex(value)
+                assertion = {"type": "javascript", "value": value}
+            # Fix JavaScript assertions that require American "flavor" when spec is British English
+            if a_type == "javascript" and "flavor" in value and "flavour" not in value:
+                spec_str = " ".join(spec_requirements).lower() if isinstance(spec_requirements, list) else ""
+                if any("british" in k for k in spec_keys) or "british" in spec_str:
+                    # Require British spelling in output; don't require American
+                    new_value = value.replace("'flavor'", "'flavour'").replace('"flavor"', '"flavour"')
+                    new_value = re.sub(
+                        r"output\.includes\s*\(\s*['\"]with a spicy flavor['\"]\s*\)",
+                        "(output.includes('flavour') && (output.includes('spicy') || output.includes('spice')))",
+                        new_value,
+                    )
+                    new_asserts.append({"type": "javascript", "value": new_value})
+                    continue
+            new_asserts.append(assertion)
+
+        test_case["assert"] = new_asserts
+    return test_cases
 
 
 def normalize_assertions(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -367,17 +461,13 @@ def generate_test_cases_for_spec(
 {examples_text}
 
 IMPORTANT GUIDELINES:
-1. Test case inputs should be realistic product attribute data or natural language requests
-2. For product descriptions, use structured format: "Product attributes: NAME_LONG='ProductName', BRAND='BrandName', FORMAT='Format', ..."
-3. Assertions should check for SPECIFICATIONS being followed, not exact output strings
-4. Use flexible assertions that check for:
-   - Presence of required elements (contains)
-   - Absence of forbidden elements (javascript with !output.includes)
-   - Format compliance (javascript with regex or string checks)
-   - Structural requirements (javascript checking HTML tags, segments, etc.)
-5. Avoid assertions that check for exact word-for-word output matches
-6. Focus on testing specification compliance, not exact phrasing
-7. If examples are provided, generate test cases that match their style and distribution
+1. Test case inputs should be realistic product attribute data or natural language requests.
+2. For product descriptions, use structured format: "Product attributes: NAME_LONG='...', BRAND='...', FORMAT='...', ..."
+3. Assertions must check SPECIFICATION COMPLIANCE, not exact repetition of input wording. The model will paraphrase (e.g. "hydrates" → "hydration", "breathable" → "allows air flow"). Use JavaScript with stems or semantic checks, not "contains" for such terms.
+4. If this spec requires British English: never assert that the output must contain American spellings (e.g. "flavor"). Assert British spellings (e.g. "flavour") or absence of American spellings.
+5. Use flexible assertions: JavaScript for semantic presence, forbidden-word checks (!output.includes), HTML/structure checks. Use "contains" only for terms that must appear literally (e.g. "flavour" when testing British English).
+6. Do not require exact phrases from the input (e.g. "rich texture", "comfortable sleep experience")—check for meaning instead.
+7. If examples are provided, match their style and distribution.
 
 Each test case must include metadata linking it to the "{spec_name}" specification."""
 
@@ -391,6 +481,8 @@ Each test case must include metadata linking it to the "{spec_name}" specificati
         
         # Normalize assertions to use valid promptfoo types
         test_cases = normalize_assertions(test_cases)
+        # Relax brittle contains (paraphrased terms) and fix American spelling in British-English specs
+        test_cases = relax_brittle_contains(test_cases)
         
         # Ensure metadata links to this spec
         for test_case in test_cases:
