@@ -7,6 +7,7 @@ import click
 from specalign.commands.compile import run_compile
 from specalign.commands.evaluate import run_evaluate
 from specalign.commands.generate import run_generate
+from specalign.commands.generate_behavior import run_generate_behavior
 from specalign.commands.init import run_init
 from specalign.commands.optimize import run_optimize
 from specalign.workspace import Workspace
@@ -152,6 +153,35 @@ def generate(path: Path, model: Path, output: Path, count: int, per_spec: int, w
     """Generate synthetic test cases based on specifications."""
     workspace = Workspace(path)
     run_generate(workspace, model, output, count, per_spec, workers, examples)
+
+
+@cli.command(name="generate-behavior")
+@click.option(
+    "--path",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=None,
+    help="Workspace path (defaults to current directory)",
+)
+@click.option(
+    "--spec",
+    required=True,
+    help="Spec filename in .specalign/specs/, e.g. file-system-management.md",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    help="Directory to write the generated behavior test (e.g. tests/integration/tests)",
+)
+@click.option(
+    "--test-name",
+    required=True,
+    help="Basename for the generated test file, e.g. b06_file_system_locate_before_edit",
+)
+def generate_behavior(path: Path, spec: str, output_dir: Path, test_name: str):
+    """Generate a skeleton Python behavior test from a single spec."""
+    workspace = Workspace(path)
+    run_generate_behavior(workspace, spec, output_dir, test_name)
 
 
 @cli.command()
