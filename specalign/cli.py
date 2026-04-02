@@ -7,6 +7,8 @@ import click
 from specalign.commands.compile import run_compile
 from specalign.commands.evaluate import run_evaluate
 from specalign.commands.generate import run_generate
+from specalign.commands.generate_behavior import run_generate_behavior
+from specalign.commands.generate_behavior import run_generate_behavior_batch
 from specalign.commands.init import run_init
 from specalign.commands.optimize import run_optimize
 from specalign.workspace import Workspace
@@ -152,6 +154,132 @@ def generate(path: Path, model: Path, output: Path, count: int, per_spec: int, w
     """Generate synthetic test cases based on specifications."""
     workspace = Workspace(path)
     run_generate(workspace, model, output, count, per_spec, workers, examples)
+
+
+@cli.command(name="generate-behavior")
+@click.option(
+    "--path",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=None,
+    help="Workspace path (defaults to current directory)",
+)
+@click.option(
+    "--spec",
+    required=True,
+    help="Spec filename in .specalign/specs/, e.g. file-system-management.md",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    help="Directory to write the generated behavior test (e.g. tests/integration/tests)",
+)
+@click.option(
+    "--test-name",
+    required=True,
+    help="Basename for the generated test file, e.g. b06_file_system_locate_before_edit",
+)
+@click.option(
+    "--prompt-link",
+    required=False,
+    default=None,
+    help=(
+        "Exact system prompt rule URL for provenance (ideally with line anchor), "
+        "e.g. .../system_prompt.j2#L50"
+    ),
+)
+@click.option(
+    "--simple-instruction-body",
+    required=False,
+    default=None,
+    help="Simple QA-style user instruction (obvious positive/negative).",
+)
+@click.option(
+    "--normal-instruction-body",
+    required=False,
+    default=None,
+    help="Realistic user-like instruction (this will be used as INSTRUCTION).",
+)
+@click.option(
+    "--behavior-kind",
+    required=False,
+    default=None,
+    help=(
+        "Optional built-in verifier kind to generate behavior-specific deterministic checks. "
+        "Examples: git_no_interactive_pager, commit_message_no_literal_backslash_n, "
+        "no_hallucinated_pr_labels, no_extra_markdown_files, avoid_extreme_defensive_programming."
+    ),
+)
+def generate_behavior(
+    path: Path,
+    spec: str,
+    output_dir: Path,
+    test_name: str,
+    prompt_link: str | None,
+    simple_instruction_body: str | None,
+    normal_instruction_body: str | None,
+    behavior_kind: str | None,
+):
+    """Generate a skeleton Python behavior test from a single spec."""
+    workspace = Workspace(path)
+    run_generate_behavior(
+        workspace,
+        spec,
+        output_dir,
+        test_name,
+        prompt_link=prompt_link,
+        simple_instruction_body=simple_instruction_body,
+        normal_instruction_body=normal_instruction_body,
+        behavior_kind=behavior_kind,
+    )
+
+
+@cli.command(name="generate-behavior-batch")
+@click.option(
+    "--path",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=None,
+    help="Workspace path (defaults to current directory)",
+)
+@click.option(
+    "--manifest",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help=(
+        "CSV manifest with columns: test_name,spec_filename,normal_instruction_body "
+        "(or legacy instruction_body), simple_instruction_body (optional), "
+        "behavior_kind (optional), "
+        "prompt_link (optional), required_command_substrings (optional),"
+        "forbidden_command_substrings (optional)."
+    ),
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    help="Directory to write generated tests.",
+)
+@click.option(
+    "--default-prompt-link",
+    required=False,
+    default=None,
+    type=str,
+    help="Fallback prompt link if a row doesn't specify prompt_link.",
+)
+def generate_behavior_batch(
+    path: Path,
+    manifest: Path,
+    output_dir: Path,
+    default_prompt_link: str | None,
+):
+    """Generate multiple behavior test files from a CSV manifest."""
+    workspace = Workspace(path)
+    run_generate_behavior_batch(
+        workspace=workspace,
+        manifest_csv=manifest,
+        output_dir=output_dir,
+        default_prompt_link=default_prompt_link,
+    )
 
 
 @cli.command()
