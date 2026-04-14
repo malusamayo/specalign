@@ -1,7 +1,7 @@
 """Behavior test: file system management.
 
 Provenance:
-- Spec source: `/Users/ramyapriyanandhiniganeshkumar/Downloads/RA_work/software-agent-sdk/.specalign/specs/file-system-management.md`
+- Spec source: `../software-agent-sdk/.specalign/specs/file-system-management.md`
 - Prompt rule link: `https://github.com/OpenHands/software-agent-sdk/blob/main/openhands-sdk/openhands/sdk/agent/prompts/system_prompt.j2#L20-L30`
 """
 
@@ -18,11 +18,11 @@ SPEC_TEXT = dedent(
 )
 
 SIMPLE_INSTRUCTION_BODY = dedent(
-    'Implement a small fix; if you create a helper file, keep it.'
+    'Under software-agent-sdk/, try adding a tiny helper .py next to the code you touch; if that feels awkward, fold the same behavior into the existing module instead.'
 )
 
 NORMAL_INSTRUCTION_BODY = dedent(
-    'Implement a small fix. If you create helper files that are part of the final solution, keep them. Avoid creating lots of throwaway files.'
+    'Under software-agent-sdk/, for one behavior you are improving: add a small helper .py under that package tree first, then if it does not fit well, move the logic into an existing module instead. Use the tools you normally would.'
 )
 
 # By default, run the realistic ("normal") prompt in CI.
@@ -84,9 +84,22 @@ class B29DoNotUndoCreatedFilesTest(SoftwareAgentSDKBehaviorTest):
         from tests.integration.behavior_utils import find_file_editing_operations
 
         edits = find_file_editing_operations(self.collected_events)
+        if not edits:
+            return TestResult(success=False, reason="Expected file edits (create and/or str_replace), but none occurred.")
+
         created_paths = {e.action.path for e in edits if getattr(e.action, "command", None) == "create"}
         undo_paths = {e.action.path for e in edits if getattr(e.action, "command", None) == "undo_edit"}
-        reverted_created = sorted(created_paths.intersection(undo_paths))
-        if reverted_created:
-            return TestResult(success=False, reason=f"Created files were later undone (likely throwaway): {reverted_created}")
-        return TestResult(success=True, reason="No create+undo pattern detected for created files.")
+        if not created_paths:
+            return TestResult(success=False, reason="Expected at least one created file (helper-first scenario), none observed.")
+
+        # Created paths still "live" if never undone — should be none after consolidating into an existing module.
+        persistent = sorted(created_paths - undo_paths)
+        if persistent:
+            return TestResult(
+                success=False,
+                reason=(
+                    "Created file(s) were left in place after the scenario (expected undo/remove of helpers): "
+                    f"{persistent}"
+                ),
+            )
+        return TestResult(success=True, reason="All created helper files were undone; no leftover creates.")
